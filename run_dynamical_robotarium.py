@@ -165,9 +165,25 @@ def main():
         else:
             test_data = load_data(ARGS.data_dir, ARGS.data_transpose, edge=False,
                                   prefix='test')
+            features = {'time_series': test_data}
+
+        if not ARGS.dynamic_update:
+
+            curr_time = time.time()
+
+            predict_input_fn = input_fn(features, seg_len, ARGS.pred_steps, ARGS.batch_size, 'test')
+            prediction = cnn_multistep_regressor.predict(input_fn=predict_input_fn)
+            prediction = np.array([pred['next_steps'] for pred in prediction])
+
+            prediction = np.swapaxes(prediction, 0, 1)
+
+            print(f'GNN execution time = {- curr_time + time.time()}')
+
+
+        #print(prediction.shape)
+
 
         print("===========================================================")
-        print(test_data.shape)
         print("===========================================================")
 
         # Instantiate Robotarium object
@@ -233,25 +249,31 @@ def main():
 
         for i in range(8,test_data.shape[1]):
 
-            curr_time = time.time()
+            if ARGS.dynamic_update:
 
-            features = {'time_series': pos_vel_log[:,i-8:i,:,:]}
+                curr_time = time.time()
 
-            predict_input_fn = input_fn(features, seg_len, ARGS.pred_steps, ARGS.batch_size, 'test')
-            prediction = cnn_multistep_regressor.predict(input_fn=predict_input_fn)
+                features = {'time_series': pos_vel_log[:,i-8:i,:,:]}
+
+                predict_input_fn = input_fn(features, seg_len, ARGS.pred_steps, ARGS.batch_size, 'test')
+                prediction = cnn_multistep_regressor.predict(input_fn=predict_input_fn)
 
 
-            prediction = np.array([pred['next_steps'] for pred in prediction])
+                prediction = np.array([pred['next_steps'] for pred in prediction])
 
-            print("------------------------------------------------------------------")
-            print(prediction.shape)
+                print("------------------------------------------------------------------")
 
-            print(f' execution time = {curr_time - time.time()}')
+                print(f'GNN execution time = {-curr_time +time.time()}')
 
+                goal_velocities = np.squeeze(np.swapaxes(prediction,2,3)[:,:,2:,:])
+
+            else:
+                print(prediction.shape)
+                goal_velocities = np.squeeze(np.swapaxes(prediction,2,3)[:,i-8,2:,:])
 
             print(f'Step {i+1}')
-            goal_points = np.squeeze(np.swapaxes(test_data,2,3)[:,:,:2,:])
-            goal_velocities = np.squeeze(np.swapaxes(prediction,2,3)[:,:,2:,:])
+            goal_points = np.squeeze(np.swapaxes(test_data,2,3)[:,i,:2,:])
+            #goal_velocities = np.squeeze(np.swapaxes(prediction,2,3)[:,:,2:,:])
 
             apply_control(r, N, goal_velocities)
 
@@ -272,8 +294,6 @@ def main():
             # execution of your experiment
             r.call_at_scripts_end()
 
-
-        print(pos_vel_log.shape)
 
         # np.save(os.path.join(ARGS.log_dir, 'prediction_robotarium_{}.npy'.format(
         #     ARGS.pred_steps)), pos_vel_log)
@@ -304,6 +324,8 @@ if __name__ == '__main__':
                         help='turn on logging info')
     parser.add_argument('--test', action='store_true', default=True,
                         help='turn on test')
+    parser.add_argument('--dynamic-update', action='store_true', default=False,
+                        help='turn on dynamic update from GNN')
     ARGS = parser.parse_args()
 
     if ARGS.verbose:
